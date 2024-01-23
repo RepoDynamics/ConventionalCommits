@@ -1,6 +1,5 @@
-from typing import Any
-import json
-import copy
+import json as _json
+import copy as _copy
 
 
 class ConventionalCommitMessage:
@@ -62,8 +61,8 @@ class ConventionalCommitMessage:
         return self._body
 
     @property
-    def footer(self) -> dict[str, Any]:
-        return copy.deepcopy(self._footer)
+    def footer(self) -> dict[str, str | bool | int | float | list | dict]:
+        return _copy.deepcopy(self._footer)
 
     @property
     def summary(self):
@@ -77,7 +76,7 @@ class ConventionalCommitMessage:
         if self._footer:
             commit += f"\n\n{'-'*10}\n\n"
             for key, values in self._footer.items():
-                commit += f"{key}: {json.dumps(values)}\n"
+                commit += f"{key}: {_json.dumps(values)}\n"
         return commit.strip() + "\n"
 
     def __repr__(self):
