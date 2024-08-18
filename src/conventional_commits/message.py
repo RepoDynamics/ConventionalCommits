@@ -1,5 +1,6 @@
-import json as _json
 import copy as _copy
+
+import pyserials as _ps
 
 
 class ConventionalCommitMessage:
@@ -65,19 +66,23 @@ class ConventionalCommitMessage:
         return _copy.deepcopy(self._footer)
 
     @property
-    def summary(self):
+    def summary(self) -> str:
         scope = f"({', '.join(self._scope)})" if self._scope else ""
         return f"{self._type}{scope}: {self._description}"
 
-    def __str__(self):
+    @property
+    def footerless(self) -> str:
         commit = self.summary
         if self._body:
             commit += f"\n\n{self._body}"
+        return commit.strip()
+
+    def __str__(self):
+        commit = self.footerless
         if self._footer:
             commit += f"\n\n{'-'*10}\n\n"
-            for key, values in self._footer.items():
-                commit += f"{key}: {_json.dumps(values)}\n"
-        return commit.strip() + "\n"
+            commit += _ps.write.to_yaml_string(self._footer)
+        return commit.strip()
 
     def __repr__(self):
         return (

@@ -1,5 +1,5 @@
 import re as _re
-import json as _json
+import pyserials as _ps
 
 from conventional_commits.message import ConventionalCommitMessage as _ConventionalCommitMessage
 
@@ -75,27 +75,20 @@ class ConventionalCommitParser:
 
     @staticmethod
     def _parse_footer(footers: list[str]) -> dict:
-        parsed_footers = {}
+        selected_lines = []
         for footer in footers:
             # Sometimes GitHub adds a second horizontal line after the original footer; skip it
             if not footer or _re.fullmatch("-{3,}", footer):
                 continue
-            match = _re.match(r"^(?P<key>[\w-]+)( *:* *(?P<value>.*))?$", footer)
-            if match:
-                key = match.group("key")
-                val = match.group("value").strip() if match.group("value") else "true"
-                if key in parsed_footers:
-                    raise ValueError(f"Duplicate footer: {footer}")
-                try:
-                    parsed_footers[key] = _json.loads(val)
-                except _json.JSONDecodeError:
-                    raise ValueError(f"Invalid footer value: {footer}")
-                # footer_list = parsed_footers.setdefault(match.group("key"), [])
-                # footer_list.append(match.group("value").strip() if match.group("value") else True)
-            else:
-                # Otherwise, the footer is invalid
-                raise ValueError(f"Invalid footer: {footer}")
-        return parsed_footers
+            selected_lines.append(footer)
+        footer_str = "\n".join(selected_lines)
+        try:
+            footer_dict = _ps.read.yaml_from_string(data=footer_str)
+        except _ps.exception.read.PySerialsReadFromStringException as e:
+            raise ValueError(f"Invalid footer: {footer_str}") from e
+        if not isinstance(footer_dict, dict):
+            raise ValueError(f"Invalid footer: {footer_dict}")
+        return footer_dict
 
 
 def create(
