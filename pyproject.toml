@@ -17,9 +17,9 @@ namespaces = true
 # ----------------------------------------- Project Metadata -------------------------------------
 #
 [project]
-version = "0.0.0.dev8"
+version = "0.0.0.dev9"
 name = "ConventionalCommits"
 requires-python = ">=3.10"
 dependencies = [
-    "PySerials == 0.0.0.dev12",
+    "PySerials == 0.0.0.dev14",
 ]
