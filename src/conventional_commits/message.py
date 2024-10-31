@@ -8,8 +8,8 @@ class ConventionalCommitMessage:
         self,
         typ: str,
         description: str,
-        scope: str | tuple[str, ...] | list[str] = "",
-        body: str = "",
+        scope: str | tuple[str, ...] | list[str] | None = None,
+        body: str | None = None,
         footer: dict[str, str | bool | int | float | list | dict] | None = None,
     ):
         for arg, arg_name in ((typ, "typ"), (description, "description")):
@@ -23,13 +23,10 @@ class ConventionalCommitMessage:
                 raise ValueError(f'Argument `{arg_name}` must not contain a colon, but got: """{arg}"""')
         self._type = typ
         self._description = description
-        if isinstance(body, str):
-            self._body = body.strip()
-        else:
-            raise TypeError(f"Argument 'body' must be a string or None, but got {type(body)}: {body}")
-        if scope == "":
+        # Process scope
+        if not scope:
             scope = []
-        if isinstance(scope, (list, tuple)):
+        elif isinstance(scope, (list, tuple)):
             self._scope = tuple(str(s) for s in scope)
         elif isinstance(scope, str):
             self._scope = (scope, )
@@ -37,7 +34,15 @@ class ConventionalCommitMessage:
             raise TypeError(
                 f"Argument 'scope' must be a string or list/tuple of strings, but got {type(scope)}: {scope}"
             )
-        if footer is None:
+        # Process body
+        if not body:
+            self._body = ""
+        elif isinstance(body, str):
+            self._body = body.strip()
+        else:
+            raise TypeError(f"Argument 'body' must be a string or None, but got {type(body)}: {body}")
+        # Process footer
+        if not footer:
             self._footer = {}
         elif isinstance(footer, dict):
             self._footer = {str(key): value for key, value in footer.items()}
