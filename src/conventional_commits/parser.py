@@ -1,155 +1,121 @@
+from __future__ import annotations as _annotations
+
+from typing import TYPE_CHECKING as _TYPE_CHECKING
 import re as _re
 import pyserials as _ps
 
-from conventional_commits.message import ConventionalCommitMessage as _ConventionalCommitMessage
+import conventional_commits as _convcom
+
+if _TYPE_CHECKING:
+    from typing import Sequence, Callable
+    from re import Pattern
 
 
 class ConventionalCommitParser:
-    def __init__(self, types: tuple[str, ...] | list[str] | set[str] | str | None = None):
-        if types is None:
-            self._types = None
-            types_pattern = r"[\w-]+"
-        else:
-            if isinstance(types, str):
-                types = [types]
-            elif not isinstance(types, (list, tuple, set)):
-                raise TypeError(
-                    f"Argument 'types' must be a string or list/tuple/set of strings, "
-                    f"but got type '{type(types)}': {types}"
-                )
-            type_pattern = _re.compile(r"^[\w-]+$")
-            for typ in types:
-                if not isinstance(typ, str):
-                    raise TypeError(
-                        f"Argument 'types' must be a list/tuple/set of strings, "
-                        f"but element {typ} has type '{type(typ)}'."
-                    )
-                if not type_pattern.match(typ):
-                    raise ValueError(
-                        f"Type '{typ}' does not match the regex pattern '{type_pattern.pattern}'."
-                    )
-            self._types = set(types)
-            types_pattern = "|".join(self._types)
-        pattern_summary = rf"""
-            ^
-            (?P<typ>{types_pattern})         # type
-            (?:\((?P<scope>[^\)]+)\))?       # optional scope within parentheses
-            :[ ](?P<description>.+)              # commit description after ": "
-            $
-        """
-        self._pattern_summary = _re.compile(pattern_summary, flags=_re.VERBOSE)
+    def __init__(
+        self,
+        type_regex: Pattern,
+        scope_regex: Pattern,
+        description_regex: Pattern,
+        scope_start_separator_regex: Pattern,
+        scope_end_separator_regex: Pattern,
+        scope_items_separator_regex: Pattern,
+        description_separator_regex: Pattern,
+        body_separator_regex: Pattern,
+        footer_separator_regex: Pattern,
+        footer_reader: Callable[[str], dict],
+        footer_special_lines: Sequence[tuple[str, Callable[[_re.Match, dict], None]]],
+    ):
+        self._type_regex = type_regex
+        self._scope_regex = scope_regex
+        self._description_regex = description_regex
+        self._scope_start_separator_regex = scope_start_separator_regex
+        self._scope_end_separator_regex = scope_end_separator_regex
+        self._scope_items_separator_regex = scope_items_separator_regex
+        self._description_separator_regex = description_separator_regex
+        self._body_separator_regex = body_separator_regex
+        self._footer_separator_regex = footer_separator_regex
+        self._footer_reader = footer_reader
+        self._footer_special_lines = footer_special_lines
         return
 
-    @property
-    def types(self) -> set[str] | None:
-        return self._types
-
-    def parse(self, message: str) -> _ConventionalCommitMessage | None:
+    def parse(self, message: str) -> _convcom.ConventionalCommitMessage | None:
         if not isinstance(message, str):
             raise TypeError(f"Invalid commit message type: {type(message)}")
-        message = message.strip()
-        if not message:
-            return
-        lines = message.splitlines()
-        summary = lines[0]
-        summary_match = self._pattern_summary.match(summary)
-        if not summary_match:
-            return
-        commit_parts = summary_match.groupdict()
-        commit_parts["scope"] = (
-            tuple(scope.strip() for scope in commit_parts["scope"].split(","))
-            if commit_parts["scope"] else ""
+        rest, footer = self._parse_footer(message)
+        if not rest:
+            raise ValueError("Empty commit message")
+        summary, body = self._parse_body(rest)
+        if not summary:
+            raise ValueError("Empty commit summary")
+        typ, scope, description = self._parse_summary(summary)
+        return _convcom.create(
+            type=typ,
+            scope=scope,
+            description=description,
+            body=body,
+            footer=footer,
+            type_regex=self._type_regex,
+            scope_regex=self._scope_regex,
+            description_regex=self._description_regex,
         )
-        commit_parts["description"] = commit_parts["description"].strip()
-        commit_parts |= {"body": "", "footer": None}
-        if len(lines) == 1:
-            return _ConventionalCommitMessage(**commit_parts)
-        for line_idx, line in enumerate(lines[1:]):
-            if line.startswith("---") and all(c == "-" for c in line):
-                break
+
+    def _parse_summary(self, summary: str) -> tuple[str | None, list[str], str]:
+        parts = self._description_separator_regex.split(summary, maxsplit=1)
+        if len(parts) == 1:
+            typ = ""
+            scope = []
+            description = parts[0]
         else:
-            line_idx += 1
-        commit_parts["body"] = "\n".join(lines[1:line_idx + 1]).strip()
-        commit_parts["footer"] = self._parse_footer(lines[line_idx + 2:]) or None
-        return _ConventionalCommitMessage(**commit_parts)
+            description = parts[1]
+            parts = self._scope_start_separator_regex.split(parts[0], maxsplit=1)
+            if len(parts) == 1:
+                typ = parts[0]
+                scope = []
+            else:
+                typ = parts[0]
+                scope_clean = self._scope_end_separator_regex.split(parts[1], maxsplit=1)
+                if len(scope_clean) == 1:
+                    raise ValueError(f"Invalid scope: {parts[1]}")
+                if scope_clean[1].strip():
+                    raise ValueError(f"Invalid scope end: {scope_clean[1]}")
+                scope_clean = scope_clean[0]
+                scope = self._scope_items_separator_regex.split(scope_clean)
+        return typ, scope, description
 
-    @staticmethod
-    def _parse_footer(footers: list[str]) -> dict:
-        selected_lines = []
-        for footer in footers:
-            # Sometimes GitHub adds a second horizontal line after the original footer; skip it
-            if not footer or _re.fullmatch("-{3,}", footer):
-                continue
-            selected_lines.append(footer)
-        footer_str = "\n".join(selected_lines)
+    def _parse_body(self, footerless_message: str) -> tuple[str, str]:
+        parts = self._body_separator_regex.split(footerless_message, maxsplit=1)
+        if len(parts) == 1:
+            return footerless_message, ""
+        return parts[0].strip(), parts[1].strip()
+
+
+    def _parse_footer(self, message: str) -> tuple[str, dict]:
+        parts = self._footer_separator_regex.split(message, maxsplit=1)
+        if len(parts) == 1:
+            return message, {}
+        rest, footer_str = parts
+
+        footer_lines_special = []
+        if self._footer_special_lines:
+            footer_lines = footer_str.splitlines()
+            footer_lines_main = []
+            for footer_line in footer_lines:
+                for pattern, handler in self._footer_special_lines:
+                    match = _re.match(pattern, footer_line)
+                    if match:
+                        footer_lines_special.append((match, handler))
+                        break
+                else:
+                    footer_lines_main.append(footer_line)
+            footer_str = "\n".join(footer_lines_main)
         try:
-            footer_dict = _ps.read.yaml_from_string(data=footer_str)
-        except _ps.exception.read.PySerialsReadFromStringException as e:
+            footer = self._footer_reader(footer_str)
+        except Exception as e:
             raise ValueError(f"Invalid footer: {footer_str}") from e
-        if not isinstance(footer_dict, dict):
-            raise ValueError(f"Invalid footer: {footer_dict}")
-        return footer_dict
-
-
-def create(
-    types: tuple[str, ...] | list[str] | set[str] | str | None = None
-) -> ConventionalCommitParser:
-    return ConventionalCommitParser(types)
-
-
-def parse(
-    message: str, types: tuple[str, ...] | list[str] | set[str] | str | None = None
-) -> _ConventionalCommitMessage | None:
-    return ConventionalCommitParser(types).parse(message)
-
-
-# class CommitParser:
-#     def __init__(self, types: list[str], logger: Logger = None):
-#         self._types = types
-#         self._logger = logger or Logger()
-#         pattern = rf"""
-#             ^
-#             (?P<typ>{"|".join(types)})         # type
-#             (?:\((?P<scope>[^\)\n]+)\))?       # optional scope within parentheses
-#             :[ ](?P<title>[^\n]+)              # commit description after ": "
-#             (?:(?P<body>.*?)(\n-{{3,}}\n)|$)?  # optional commit body
-#                                                #   everything until first "\n---" or end of string
-#             (?P<footer>.*)?                    # optional footers
-#             $
-#         """
-#         self._pattern = re.compile(pattern, flags=re.VERBOSE | re.DOTALL)
-#         return
-#
-#     def parse(self, msg: str) -> CommitMsg | None:
-#         match = self._pattern.match(msg)
-#         if not match:
-#             return
-#         commit_parts = match.groupdict()
-#         if commit_parts["scope"]:
-#             commit_parts["scope"] = [scope.strip() for scope in commit_parts["scope"].split(",")]
-#         commit_parts["title"] = commit_parts["title"].strip()
-#         commit_parts["body"] = commit_parts["body"].strip() if commit_parts["body"] else ""
-#         if commit_parts["footer"]:
-#             parsed_footers = {}
-#             footers = commit_parts["footer"].strip().splitlines()
-#             for footer in footers:
-#                 # Sometimes GitHub adds a second horizontal line after the original footer; skip it
-#                 if not footer or re.fullmatch("-{3,}", footer):
-#                     continue
-#                 match = re.match(r"^(?P<key>[\w-]+)( *:* *(?P<value>.*))?$", footer)
-#                 if match:
-#                     key = match.group("key")
-#                     val = match.group("value").strip() if match.group("value") else "true"
-#                     if key in parsed_footers:
-#                         self._logger.error(f"Duplicate footer: {footer}")
-#                     try:
-#                         parsed_footers[key] = json.loads(val)
-#                     except json.JSONDecodeError:
-#                         self._logger.error(f"Invalid footer value: {footer}")
-#                     # footer_list = parsed_footers.setdefault(match.group("key"), [])
-#                     # footer_list.append(match.group("value").strip() if match.group("value") else True)
-#                 else:
-#                     # Otherwise, the footer is invalid
-#                     self._logger.warning(f"Invalid footer: {footer}")
-#             commit_parts["footer"] = parsed_footers
-#         return CommitMsg(**commit_parts)
+        if footer_lines_special:
+            for match, handler in footer_lines_special:
+                handler(match, footer)
+        if not isinstance(footer, dict):
+            raise ValueError(f"Invalid footer type {type(footer)}: {footer}")
+        return rest.strip(), footer
