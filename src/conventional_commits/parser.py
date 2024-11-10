@@ -92,11 +92,6 @@ class ConventionalCommitParser:
 
     def _parse_footer(self, message: str) -> tuple[str, dict]:
         parts = self._footer_separator_regex.split(message, maxsplit=1)
-        print(f"footer sep. regex: {self._footer_separator_regex}")
-        print("MESSAGE:")
-        print(repr(message))
-        print("PARTS:")
-        print(parts)
         if len(parts) == 1:
             return message, {}
         rest, footer_str = parts
