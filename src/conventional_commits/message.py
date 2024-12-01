@@ -125,11 +125,16 @@ class ConventionalCommitMessage:
         }
 
     @property
+    def signature(self):
+        typ = self.type or ""
+        scope = f"{self.scope_start}{self.scope_separator.join(self.scope)}{self.scope_end}" if self.scope else ""
+        return f"{typ}{scope}"
+    
+    @property
     def summary(self) -> str:
         if not self.type:
             return self.description
-        scope = f"{self.scope_start}{self.scope_separator.join(self.scope)}{self.scope_end}" if self.scope else ""
-        return f"{self.type}{scope}{self.description_separator}{self.description}"
+        return f"{self.signature}{self.description_separator}{self.description}"
 
     @property
     def footerless(self) -> str:
