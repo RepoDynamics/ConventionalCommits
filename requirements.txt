@@ -1,1 +1,1 @@
-PySerials == 0.0.0.dev57
+PySerials == 0.0.0.dev58
